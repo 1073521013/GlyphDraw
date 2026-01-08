@@ -4,72 +4,69 @@ import os
 import argparse
 import shutil
 
-# 定义不同语言的配置：Yes/No 映射 和 Instruction 翻译
+# 定义不同语言的配置
+# Output 统一修改为: Yes -> "1", No -> "0"
 LANG_CONFIG = {
     "English": {
-        "yes": "Yes", 
-        "no": "No",
+        "yes": "1", 
+        "no": "0",
         "instruction": "Determine if this is a primary notification. If it is a verification code, meal pickup code, or package pickup code, output the summary directly."
     },
     "Spanish_Mexico": {
-        "yes": "Sí", 
-        "no": "No",
+        "yes": "1", 
+        "no": "0",
         "instruction": "Determine si es una notificación principal. Si es un código de verificación, código de recolección de comida o código de paquete, proporcione el resumen directamente."
     },
     "Spanish_Spain": {
-        "yes": "Sí", 
-        "no": "No",
+        "yes": "1", 
+        "no": "0",
         "instruction": "Determine si es una notificación principal. Si es un código de verificación, código de recolección de comida o código de paquete, proporcione el resumen directamente."
     },
     "Hindi": {
-        "yes": "हाँ", 
-        "no": "नहीं",
+        "yes": "1", 
+        "no": "0",
         "instruction": "तय करें कि क्या यह प्राथमिक अधिसूचना है। यदि यह सत्यापन कोड, भोजन पिकअप कोड, या पैकेज पिकअप कोड है, तो सीधे सारांश प्रदान करें।"
     },
     "Indonesian": {
-        "yes": "Ya", 
-        "no": "Tidak",
+        "yes": "1", 
+        "no": "0",
         "instruction": "Tentukan apakah ini notifikasi utama. Jika ini adalah kode verifikasi, kode pengambilan makanan, atau kode pengambilan paket, langsung output ringkasannya."
     },
     "Thai": {
-        "yes": "ใช่", 
-        "no": "ไม่",
+        "yes": "1", 
+        "no": "0",
         "instruction": "ตรวจสอบว่าเป็นการแจ้งเตือนหลักหรือไม่ หากเป็นรหัสยืนยัน รหัสรับอาหาร หรือรหัสรับพัสดุ ให้แสดงสรุปโดยตรง"
     },
     "Chinese_Traditional": {
-        "yes": "是", 
-        "no": "否",
+        "yes": "1", 
+        "no": "0",
         "instruction": "判斷是否是首要通知，如果驗證碼、取餐碼、取件碼這三類通知，則直接輸出摘要"
     },
     # 默认/中文 Sheet
     "Sheet2": {
-        "yes": "是", 
-        "no": "否",
+        "yes": "1", 
+        "no": "0",
         "instruction": "判断是否是首要通知，如果验证码、取餐码、取件码这三类通知，则直接输出摘要"
     },
     "DEFAULT": {
-        "yes": "是", 
-        "no": "否",
+        "yes": "1", 
+        "no": "0",
         "instruction": "判断是否是首要通知，如果验证码、取餐码、取件码这三类通知，则直接输出摘要"
     }
 }
 
 def get_lang_config(sheet_name):
-    # 精确匹配
     if sheet_name in LANG_CONFIG:
         return LANG_CONFIG[sheet_name]
-    # 模糊匹配 (比如 sheet 名包含 English)
     for key in LANG_CONFIG:
         if key in sheet_name:
             return LANG_CONFIG[key]
     return LANG_CONFIG["DEFAULT"]
 
 def process_and_sync_excel(input_file, output_dir):
-    # 1. 创建输出目录
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # 2. 读取 Excel
     print(f"Reading {input_file}...")
     try:
         all_sheets = pd.read_excel(input_file, sheet_name=None)
@@ -77,7 +74,6 @@ def process_and_sync_excel(input_file, output_dir):
         print(f"Error reading file: {e}")
         return
 
-    # 3. 标签同步逻辑
     source_sheet_name = 'Sheet2'
     if source_sheet_name not in all_sheets:
         for name, df in all_sheets.items():
@@ -98,11 +94,10 @@ def process_and_sync_excel(input_file, output_dir):
     for sheet_name, df in all_sheets.items():
         print(f"Processing {sheet_name}...")
         
-        # --- 获取当前语言的配置 ---
         lang_conf = get_lang_config(sheet_name)
-        yes_str = lang_conf['yes']
-        no_str = lang_conf['no']
-        instruction_str = lang_conf['instruction'] # 获取对应语言的 instruction
+        yes_str = lang_conf['yes'] # "1"
+        no_str = lang_conf['no']   # "0"
+        instruction_str = lang_conf['instruction']
 
         # --- A. 同步标签 ---
         if len(df) != len(label_values):
@@ -120,7 +115,6 @@ def process_and_sync_excel(input_file, output_dir):
         dataset = []
         cols = df.columns.tolist()
         
-        # 判断是多语言 Sheet 还是原始 Sheet
         if 'Trans_AppName' in cols:
             col_app = 'Trans_AppName'
             col_title = 'Trans_Title'
@@ -152,21 +146,21 @@ def process_and_sync_excel(input_file, output_dir):
             
             output_val = None
             
-            # 1. 有摘要 -> 输出摘要
+            # 1. 有摘要 -> 输出摘要 (保持不变)
             if summary_val and summary_val != "[TRANSLATION FAILED]":
                 output_val = summary_val
             
-            # 2. 无摘要但标记为首要 -> 输出对应语言的 "Yes"
+            # 2. 无摘要但标记为首要 -> 输出 "1"
             elif is_primary_val == 'Y':
                 output_val = yes_str
                 
-            # 3. 其他 -> 输出对应语言的 "No"
+            # 3. 其他 -> 输出 "0"
             else:
                 output_val = no_str
             
             if output_val:
                 dataset.append({
-                    "instruction": instruction_str, # 使用对应语言的 instruction
+                    "instruction": instruction_str,
                     "input": inp,
                     "output": output_val
                 })
@@ -177,9 +171,8 @@ def process_and_sync_excel(input_file, output_dir):
             out_path = os.path.join(output_dir, json_filename)
             with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(dataset, f, ensure_ascii=False, indent=2)
-            print(f"  -> Saved {len(dataset)} items to {json_filename} (Lang={sheet_name})")
+            print(f"  -> Saved {len(dataset)} items to {json_filename}")
 
-    # 5. 写回 Excel
     print("Saving updated Excel file...")
     try:
         if not os.path.exists(input_file + ".bak"):
