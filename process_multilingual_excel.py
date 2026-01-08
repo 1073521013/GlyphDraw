@@ -3,6 +3,7 @@ import json
 import os
 import argparse
 import shutil
+import random
 
 # 定义不同语言的配置
 # Output 统一修改为: Yes -> "1", No -> "0"
@@ -63,9 +64,15 @@ def get_lang_config(sheet_name):
             return LANG_CONFIG[key]
     return LANG_CONFIG["DEFAULT"]
 
-def process_and_sync_excel(input_file, output_dir):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+def process_and_sync_excel(input_file, output_dir, test_size=200):
+    # 1. 创建输出目录结构
+    train_dir = os.path.join(output_dir, "train")
+    test_dir = os.path.join(output_dir, "test")
+    
+    if not os.path.exists(train_dir):
+        os.makedirs(train_dir)
+    if not os.path.exists(test_dir):
+        os.makedirs(test_dir)
 
     print(f"Reading {input_file}...")
     try:
@@ -91,12 +98,15 @@ def process_and_sync_excel(input_file, output_dir):
     
     updated_sheets = {}
 
+    # 设置随机种子以保证划分可复现
+    random.seed(42)
+
     for sheet_name, df in all_sheets.items():
         print(f"Processing {sheet_name}...")
         
         lang_conf = get_lang_config(sheet_name)
-        yes_str = lang_conf['yes'] # "1"
-        no_str = lang_conf['no']   # "0"
+        yes_str = lang_conf['yes']
+        no_str = lang_conf['no']
         instruction_str = lang_conf['instruction']
 
         # --- A. 同步标签 ---
@@ -146,15 +156,10 @@ def process_and_sync_excel(input_file, output_dir):
             
             output_val = None
             
-            # 1. 有摘要 -> 输出摘要 (保持不变)
             if summary_val and summary_val != "[TRANSLATION FAILED]":
                 output_val = summary_val
-            
-            # 2. 无摘要但标记为首要 -> 输出 "1"
             elif is_primary_val == 'Y':
                 output_val = yes_str
-                
-            # 3. 其他 -> 输出 "0"
             else:
                 output_val = no_str
             
@@ -165,13 +170,33 @@ def process_and_sync_excel(input_file, output_dir):
                     "output": output_val
                 })
 
-        # 保存 JSON
+        # --- C. 划分训练集和测试集 ---
         if dataset:
-            json_filename = f"{sheet_name}.json"
-            out_path = os.path.join(output_dir, json_filename)
-            with open(out_path, 'w', encoding='utf-8') as f:
-                json.dump(dataset, f, ensure_ascii=False, indent=2)
-            print(f"  -> Saved {len(dataset)} items to {json_filename}")
+            # 随机打乱
+            random.shuffle(dataset)
+            
+            # 划分
+            if len(dataset) > test_size:
+                test_set = dataset[:test_size]
+                train_set = dataset[test_size:]
+            else:
+                print(f"  Warning: Total data ({len(dataset)}) is less than requested test size ({test_size}). All data used for test.")
+                test_set = dataset
+                train_set = []
+
+            # 保存测试集
+            test_file = os.path.join(test_dir, f"{sheet_name}.json")
+            with open(test_file, 'w', encoding='utf-8') as f:
+                json.dump(test_set, f, ensure_ascii=False, indent=2)
+            
+            # 保存训练集
+            train_file = os.path.join(train_dir, f"{sheet_name}.json")
+            with open(train_file, 'w', encoding='utf-8') as f:
+                json.dump(train_set, f, ensure_ascii=False, indent=2)
+
+            print(f"  -> Processed {len(dataset)} items: {len(test_set)} for Test, {len(train_set)} for Train.")
+        else:
+            print(f"  -> No valid data for {sheet_name}")
 
     print("Saving updated Excel file...")
     try:
@@ -189,6 +214,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--input', default='/mnt/workspace/majian/vlm_data/input/首要_all.xlsx', help="Excel file path")
     parser.add_argument('--output_dir', default='/mnt/workspace/majian/vlm_data/input/jsons', help="Output directory")
+    parser.add_argument('--test_size', default=200, type=int, help="Number of samples for test set per language")
     args = parser.parse_args()
 
-    process_and_sync_excel(args.input, args.output_dir)
+    process_and_sync_excel(args.input, args.output_dir, args.test_size)
