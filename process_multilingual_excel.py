@@ -115,12 +115,9 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
                 
                 print(f"  Processing Summary Sheet '{sheet_name}'. Columns: {df.columns.tolist()}")
                 
-                # 在 extract_data_from_df 内部会自动判断是中文列还是多语言(Trans_*)列
-                # 因此这里只需要调用同一个函数，传入 is_primary_file=False (表示不看是否首要标签，只看摘要)
                 dataset = extract_data_from_df(df, lang_conf, is_primary_file=False)
                 
                 if dataset:
-                    # 合并策略
                     target_key = sheet_name
                     if sheet_name == "Sheet1" and "Sheet2" in all_datasets:
                         target_key = "Sheet2"
@@ -137,6 +134,9 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
         print(f"Summary file not found: {summary_file}")
 
     # ================= 3. 统一拆分并保存 =================
+    # 用于生成最终的 meta_config
+    meta_config = {}
+    
     print(f"\nSplitting datasets (Test Size: {test_size})...")
     for name, data in all_datasets.items():
         if not data: continue
@@ -153,11 +153,30 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
             test_set = data
             train_set = []
             
-        with open(os.path.join(test_dir, f"{name}.json"), 'w', encoding='utf-8') as f:
+        test_filename = f"{name}.json"
+        train_filename = f"{name}.json"
+        
+        test_path = os.path.join(test_dir, test_filename)
+        train_path = os.path.join(train_dir, train_filename)
+        
+        with open(test_path, 'w', encoding='utf-8') as f:
             json.dump(test_set, f, ensure_ascii=False, indent=2)
             
-        with open(os.path.join(train_dir, f"{name}.json"), 'w', encoding='utf-8') as f:
+        with open(train_path, 'w', encoding='utf-8') as f:
             json.dump(train_set, f, ensure_ascii=False, indent=2)
+
+        # 添加到 meta config (只记录训练集)
+        if train_set:
+            meta_config[name] = {
+                "file_name": os.path.abspath(train_path),
+                "weight": 1
+            }
+
+    # 保存 meta_config.json
+    meta_path = os.path.join(output_dir, "dataset_config.json")
+    with open(meta_path, 'w', encoding='utf-8') as f:
+        json.dump(meta_config, f, ensure_ascii=False, indent=2)
+    print(f"\nSaved dataset configuration to {meta_path}")
 
 def extract_data_from_df(df, lang_conf, is_primary_file=True):
     dataset = []
@@ -166,15 +185,12 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
     no_str = lang_conf['no']
     instruction_str = lang_conf['instruction']
 
-    # 逻辑修改：无论是在首要文件还是摘要文件
-    # 只要检测到 'Trans_AppName'，就优先使用多语言列
     if 'Trans_AppName' in cols:
         col_app = 'Trans_AppName'
         col_title = 'Trans_Title'
         col_content = 'Trans_Content'
         col_summary = 'Trans_Summary'
     else:
-        # 否则回退到默认的中文列名
         col_app = 'AppName'
         col_title = 'Title'
         col_content = 'Content'
@@ -196,11 +212,8 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
         
         output_val = None
         
-        # 1. 优先取摘要 (正样本)
         if summary_val and summary_val != "[TRANSLATION FAILED]" and summary_val != "":
             output_val = summary_val
-        
-        # 2. 首要文件分类标签 (仅当 is_primary_file=True 时处理)
         elif is_primary_file and '是否首要' in cols:
             is_primary = str(row.get('是否首要', '')).strip().upper()
             if is_primary == 'Y':
