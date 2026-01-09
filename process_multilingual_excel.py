@@ -63,15 +63,15 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
 
     random.seed(42)
     
-    # 用于存储所有处理后的数据：Key=数据集名称(Sheet名), Value=数据列表
     all_datasets = defaultdict(list)
+    dataset_stats = defaultdict(lambda: {"primary": 0, "summary": 0})
 
     # ================= 1. 读取并处理 首要_all.xlsx =================
     print(f"Reading Primary File: {primary_file}...")
     try:
         primary_sheets = pd.read_excel(primary_file, sheet_name=None)
         
-        # 1.1 标签同步逻辑
+        # 标签同步逻辑
         source_sheet = 'Sheet2'
         if source_sheet not in primary_sheets:
             for n, d in primary_sheets.items():
@@ -80,14 +80,9 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
                     break
         
         if source_sheet in primary_sheets:
-            print(f"Syncing labels from '{source_sheet}'...")
             label_values = primary_sheets[source_sheet]['是否首要'].values
             
-            # 临时存储用于回写 Excel
-            updated_sheets = {}
-
             for sheet_name, df in primary_sheets.items():
-                # 同步标签
                 if len(df) != len(label_values):
                     min_len = min(len(df), len(label_values))
                     df = df.iloc[:min_len].copy()
@@ -97,20 +92,13 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
                 
                 df['是否首要'] = curr_labels
                 df = df.fillna('')
-                updated_sheets[sheet_name] = df # 准备回写
-
-                # 提取数据
+                
                 lang_conf = get_lang_config(sheet_name)
                 dataset = extract_data_from_df(df, lang_conf, is_primary_file=True)
                 
                 if dataset:
                     all_datasets[sheet_name].extend(dataset)
-
-            # 回写首要文件
-            save_excel_backup(primary_file, updated_sheets)
-        else:
-            print("Warning: Could not find '是否首要' column in primary file.")
-
+                    dataset_stats[sheet_name]["primary"] += len(dataset)
     except Exception as e:
         print(f"Error processing primary file: {e}")
 
@@ -125,62 +113,71 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
                 df = df.fillna('')
                 lang_conf = get_lang_config(sheet_name)
                 
-                # 提取数据 (摘要文件也是作为正样本补充)
+                # 检查列名，防止读取失败
+                print(f"  Processing Summary Sheet '{sheet_name}'. Columns: {df.columns.tolist()}")
+                
                 dataset = extract_data_from_df(df, lang_conf, is_primary_file=False)
                 
                 if dataset:
-                    # 为了区分来源，给摘要文件的Sheet名加个前缀，或者如果想合并到同名Sheet，就去掉前缀
-                    # 这里默认加前缀 Summary_
-                    key_name = f"Summary_{sheet_name}" 
-                    all_datasets[key_name].extend(dataset)
+                    # >>> 关键逻辑：合并策略 <<<
+                    # 如果摘要文件里也是多语言Sheet（如English），则自动合并到 all_datasets['English']
+                    # 如果是默认的 Sheet1 且包含中文，则合并到 'Sheet2' (我们的中文主数据集)
                     
+                    target_key = sheet_name
+                    if sheet_name == "Sheet1" and "Sheet2" in all_datasets:
+                        target_key = "Sheet2"
+                        print(f"    -> Merging 'Sheet1' from Summary file into 'Sheet2' dataset.")
+                    
+                    all_datasets[target_key].extend(dataset)
+                    dataset_stats[target_key]["summary"] += len(dataset)
+                else:
+                    print(f"    -> No valid data extracted from {sheet_name}")
+
         except Exception as e:
             print(f"Error reading summary file: {e}")
     else:
         print(f"Summary file not found: {summary_file}")
 
-    # ================= 3. 统一拆分 训练集 / 测试集 =================
+    # ================= 3. 统一拆分并保存 =================
     print(f"\nSplitting datasets (Test Size: {test_size})...")
     for name, data in all_datasets.items():
         if not data: continue
         
-        # 随机打乱
+        # 打印统计信息
+        stats = dataset_stats[name]
+        print(f"  Dataset: {name} | Primary Source: {stats['primary']} | Summary Source: {stats['summary']} | Total: {len(data)}")
+
         random.shuffle(data)
         
-        # 拆分
         if len(data) > test_size:
             test_set = data[:test_size]
             train_set = data[test_size:]
         else:
-            print(f"  [Warning] {name}: Total {len(data)} <= {test_size}, all used for test.")
             test_set = data
             train_set = []
             
-        # 保存
         with open(os.path.join(test_dir, f"{name}.json"), 'w', encoding='utf-8') as f:
             json.dump(test_set, f, ensure_ascii=False, indent=2)
             
         with open(os.path.join(train_dir, f"{name}.json"), 'w', encoding='utf-8') as f:
             json.dump(train_set, f, ensure_ascii=False, indent=2)
-            
-        print(f"  -> {name}: {len(test_set)} Test, {len(train_set)} Train")
-
 
 def extract_data_from_df(df, lang_conf, is_primary_file=True):
-    """从 DataFrame 提取 Instruction/Input/Output"""
     dataset = []
     cols = df.columns.tolist()
     yes_str = lang_conf['yes']
     no_str = lang_conf['no']
     instruction_str = lang_conf['instruction']
 
-    # 确定列映射
     if is_primary_file and 'Trans_AppName' in cols:
         col_app, col_title, col_content, col_summary = 'Trans_AppName', 'Trans_Title', 'Trans_Content', 'Trans_Summary'
     else:
         col_app, col_title, col_content, col_summary = 'AppName', 'Title', 'Content', '摘要'
 
-    if col_app not in cols: return []
+    if col_app not in cols: 
+        # 尝试容错：有时候摘要文件的列可能叫 'App Name' 或其他
+        # 这里仅作简单检查
+        return []
 
     for _, row in df.iterrows():
         app = str(row.get(col_app, '')).strip()
@@ -196,11 +193,11 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
         output_val = None
         
         # 1. 优先取摘要 (正样本)
-        if summary_val and summary_val != "[TRANSLATION FAILED]":
+        if summary_val and summary_val != "[TRANSLATION FAILED]" and summary_val != "":
             output_val = summary_val
         
-        # 2. 如果是首要文件，处理分类标签 (正负样本)
-        elif is_primary_file:
+        # 2. 首要文件分类标签
+        elif is_primary_file and '是否首要' in cols:
             is_primary = str(row.get('是否首要', '')).strip().upper()
             if is_primary == 'Y':
                 output_val = yes_str
@@ -214,17 +211,6 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
                 "output": output_val
             })
     return dataset
-
-def save_excel_backup(filepath, sheets_dict):
-    try:
-        if not os.path.exists(filepath + ".bak"):
-            shutil.copy2(filepath, filepath + ".bak")
-        with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
-            for name, df in sheets_dict.items():
-                df.to_excel(writer, sheet_name=name, index=False)
-        print("Primary Excel file updated successfully.")
-    except Exception as e:
-        print(f"Error saving Excel backup: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
