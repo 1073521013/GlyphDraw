@@ -113,16 +113,14 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
                 df = df.fillna('')
                 lang_conf = get_lang_config(sheet_name)
                 
-                # 检查列名，防止读取失败
                 print(f"  Processing Summary Sheet '{sheet_name}'. Columns: {df.columns.tolist()}")
                 
+                # 在 extract_data_from_df 内部会自动判断是中文列还是多语言(Trans_*)列
+                # 因此这里只需要调用同一个函数，传入 is_primary_file=False (表示不看是否首要标签，只看摘要)
                 dataset = extract_data_from_df(df, lang_conf, is_primary_file=False)
                 
                 if dataset:
-                    # >>> 关键逻辑：合并策略 <<<
-                    # 如果摘要文件里也是多语言Sheet（如English），则自动合并到 all_datasets['English']
-                    # 如果是默认的 Sheet1 且包含中文，则合并到 'Sheet2' (我们的中文主数据集)
-                    
+                    # 合并策略
                     target_key = sheet_name
                     if sheet_name == "Sheet1" and "Sheet2" in all_datasets:
                         target_key = "Sheet2"
@@ -143,7 +141,6 @@ def process_and_merge_then_split(primary_file, summary_file, output_dir, test_si
     for name, data in all_datasets.items():
         if not data: continue
         
-        # 打印统计信息
         stats = dataset_stats[name]
         print(f"  Dataset: {name} | Primary Source: {stats['primary']} | Summary Source: {stats['summary']} | Total: {len(data)}")
 
@@ -169,14 +166,21 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
     no_str = lang_conf['no']
     instruction_str = lang_conf['instruction']
 
-    if is_primary_file and 'Trans_AppName' in cols:
-        col_app, col_title, col_content, col_summary = 'Trans_AppName', 'Trans_Title', 'Trans_Content', 'Trans_Summary'
+    # 逻辑修改：无论是在首要文件还是摘要文件
+    # 只要检测到 'Trans_AppName'，就优先使用多语言列
+    if 'Trans_AppName' in cols:
+        col_app = 'Trans_AppName'
+        col_title = 'Trans_Title'
+        col_content = 'Trans_Content'
+        col_summary = 'Trans_Summary'
     else:
-        col_app, col_title, col_content, col_summary = 'AppName', 'Title', 'Content', '摘要'
+        # 否则回退到默认的中文列名
+        col_app = 'AppName'
+        col_title = 'Title'
+        col_content = 'Content'
+        col_summary = '摘要'
 
     if col_app not in cols: 
-        # 尝试容错：有时候摘要文件的列可能叫 'App Name' 或其他
-        # 这里仅作简单检查
         return []
 
     for _, row in df.iterrows():
@@ -196,7 +200,7 @@ def extract_data_from_df(df, lang_conf, is_primary_file=True):
         if summary_val and summary_val != "[TRANSLATION FAILED]" and summary_val != "":
             output_val = summary_val
         
-        # 2. 首要文件分类标签
+        # 2. 首要文件分类标签 (仅当 is_primary_file=True 时处理)
         elif is_primary_file and '是否首要' in cols:
             is_primary = str(row.get('是否首要', '')).strip().upper()
             if is_primary == 'Y':
