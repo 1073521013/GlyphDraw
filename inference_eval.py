@@ -2,6 +2,7 @@ import json
 import argparse
 import os
 import torch
+import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
@@ -21,7 +22,9 @@ def get_label(output_str):
     1: "1"
     2: Summary (JSON or other text)
     """
-    s = output_str.strip()
+    # Remove <think>...</think> content if present, matching across newlines
+    s = re.sub(r'<think>.*?</think>', '', output_str, flags=re.DOTALL).strip()
+    
     if s == "0":
         return 0
     elif s == "1":
