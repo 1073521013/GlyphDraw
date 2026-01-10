@@ -130,6 +130,9 @@ def main():
         # Decode only the new tokens
         generated_ids = outputs[0][len(input_ids[0]):]
         pred_text = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+        
+        # Remove <think> content from prediction
+        pred_text = re.sub(r'<think>.*?</think>', '', pred_text, flags=re.DOTALL).strip()
 
         # Evaluation
         gt_class = get_label(gt_output)
