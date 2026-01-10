@@ -67,6 +67,14 @@ def load_model_and_tokenizer(model_path, base_model_path=None, device="cuda"):
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
     model.eval()
+    
+    # Reset generation config to avoid warnings with do_sample=False
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        model.generation_config.do_sample = False
+        model.generation_config.top_k = None
+        model.generation_config.top_p = None
+        model.generation_config.temperature = None
+        
     return model, tokenizer
 
 def evaluate_dataset(model, tokenizer, data, args, dataset_name):
