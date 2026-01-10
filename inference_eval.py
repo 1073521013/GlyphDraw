@@ -154,9 +154,12 @@ def main():
             "match": is_match
         })
 
-        # Optional: Print first few mismatches for debugging
-        if not is_match and total <= 5:
-             print(f"\n[Mismatch] GT: {gt_class} ({gt_output}) | Pred: {pred_class} ({pred_text})")
+        # Print mismatches
+        if not is_match:
+             print(f"\n[Mismatch] Index: {i}")
+             print(f"  Input: {input_text[:200]}..." if len(input_text) > 200 else f"  Input: {input_text}")
+             print(f"  GT:   {gt_class} (Raw: {gt_output})")
+             print(f"  Pred: {pred_class} (Raw: {pred_text})")
 
     # Final Report
     print("\n" + "="*30)
